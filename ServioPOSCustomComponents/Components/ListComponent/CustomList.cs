@@ -32,7 +32,7 @@ public class CustomList : SKCanvasView
     private float _targetYOffset;
     private float _maxHeight;
     private float _sumScroll;
-    private Queue<(float, DateTime)> _scrollQueue = new Queue<(float, DateTime)> ();
+    private Queue<(float, DateTime)> _scrollQueue = new Queue<(float, DateTime)>();
     #endregion
 
     private List<ListDrawable> ItemsDrawable { get; set; } = new List<ListDrawable>();
@@ -118,6 +118,13 @@ public class CustomList : SKCanvasView
         e.OldItems?.Cast<INotifyPropertyChanged>().ToList().ForEach(item => item.PropertyChanged -= OnItemPropertyChanged);
         e.NewItems?.Cast<INotifyPropertyChanged>().ToList().ForEach(item => item.PropertyChanged += OnItemPropertyChanged);
 
+        CreateItemDrawables();
+        GetVisibleItems(_currentYOffset, _info.Height);
+        InvalidateSurface();
+    }
+
+    private void CreateItemDrawables()
+    {
         ItemsDrawable = new List<ListDrawable>();
         float height = 0;
         for (var index = 0; index < Items.Count; index++)
@@ -133,8 +140,6 @@ public class CustomList : SKCanvasView
             height += itemHeight;
         }
         _maxHeight = height;
-        GetVisibleItems(_currentYOffset, _info.Height);
-        InvalidateSurface();
     }
 
 
@@ -165,14 +170,7 @@ public class CustomList : SKCanvasView
     private void CustomList_Touch(object? sender, SKTouchEventArgs e)
     {
         var y = e.Location.Y;
-        var dy = y - _startInteractionY;
-
-        _scrollQueue.Enqueue((dy, DateTime.Now));
-        if (_scrollQueue.Count > 4)
-        {
-            _scrollQueue.Dequeue();
-        }
-
+        var x = e.Location.X;
         //Debug.WriteLine($"Event: {e.ActionType.ToString()} Y:{e.Location.Y} dY:{dy}");
         if (e.ActionType == SKTouchAction.Pressed)
         {
@@ -186,6 +184,8 @@ public class CustomList : SKCanvasView
 
         if (e.ActionType == SKTouchAction.Moved)
         {
+            var dy = y - _startInteractionY;
+            EnqueueTouchEvent(dy);
             if (_isScrolling)
             {
                 SetTargetOffset(dy);
@@ -196,32 +196,36 @@ public class CustomList : SKCanvasView
 
         if (e.ActionType == SKTouchAction.Released)
         {
+            //CalculateInertia();
+            _scrollQueue.Clear();
             _startInteractionY = y;
             _isScrolling = false;
-
             if (MathF.Abs(_sumScroll) < 20)
             {
-                ItemClicked(y - ItemTemplate.GetHeaderHeight());
+                ItemClicked(x, y - _currentYOffset - ItemTemplate.GetHeaderHeight());
             }
-            else
-            {
-                CalculateInertia();
-            }
+
         }
-
-        //if(e.ActionType == SKTouchAction.WheelChanged)
-        //{
-        //    dy = e.WheelDelta;
-        //    SetTargetOffset(dy);
-        //}
-
-
 
         e.Handled = true;
     }
 
+    private void EnqueueTouchEvent(float dy)
+    {
+        _scrollQueue.Enqueue((dy, DateTime.Now));
+        if (_scrollQueue.Count > 10)
+        {
+            _scrollQueue.Dequeue();
+        }
+    }
+
     private void CalculateInertia()
     {
+        if(_scrollQueue.Count < 5)
+        {
+            return;
+        }
+        
         var sum = 0f;
         var totalTime = 0f;
         var previousTime = _scrollQueue.Peek().Item2;
@@ -237,13 +241,14 @@ public class CustomList : SKCanvasView
         var velocity = sum / totalTime;
         Debug.WriteLine($"Velocity: {velocity}");
 
-        if (MathF.Abs(velocity) < 0.1f)
+        if (MathF.Abs(velocity) < 3f)
         {
-            // return;
+            return;
         }
 
         var timeToStop = MathF.Abs(velocity) / 0.1f;
         var distance = velocity * timeToStop;
+        Debug.WriteLine($"Distance: {distance}");
         SetTargetOffset(distance);
     }
 
@@ -264,13 +269,15 @@ public class CustomList : SKCanvasView
         }
     }
 
-    private void ItemClicked(float f)
+    private void ItemClicked(float x, float y)
     {
         try
         {
-            var y = f - _currentYOffset;
             var item = VisibleItemsDrawable.FirstOrDefault(x => x.Rect.Top < y && x.Rect.Bottom > y);
-            Debug.WriteLine((item.Item as TestModel).Id);
+            if (item != null)
+            {
+                ItemTemplate.ProccessItemClick(item, x, y);
+            }
         }
         catch (Exception e)
         {
@@ -286,7 +293,13 @@ public class CustomList : SKCanvasView
         _canvas = e.Surface.Canvas;
         _canvas.Clear();
         _info = e.Info;
-        _drawRect = new SKRect(0, 0, _info.Width, _info.Height);
+        if(_drawRect.Right != _info.Width || _drawRect.Bottom != _info.Height)
+        {
+            _drawRect = new SKRect(0, 0, _info.Width, _info.Height);
+            CreateItemDrawables();
+            GetVisibleItems(_currentYOffset, _info.Height);
+        }
+       
         _canvas.DrawRect(_drawRect, ItemTemplate.BackgroundPaint);
         for (int i = 0; i < VisibleItemsDrawable.Count; i++)
         {
@@ -296,6 +309,34 @@ public class CustomList : SKCanvasView
         }
 
         ItemTemplate.DrawHeaders(_canvas, _drawRect);
+
+        DrawScrollLine(_canvas, _drawRect);
+    }
+
+    private void DrawScrollLine(SKCanvas canvas, SKRect drawRect)
+    {
+        SKColor thumbColor = new SKColor(0, 0, 0, 80);
+        SKColor trackColor = new SKColor(0, 0, 0, 30);
+        var paint = new SKPaint()
+        {
+            Style = SKPaintStyle.Fill,
+            StrokeWidth = 2,
+            IsAntialias = true
+        };
+        var width = 8;
+        var cornerRadius = 10;
+        var height = drawRect.Height - ItemTemplate.GetHeaderHeight();
+        var scrollHeight = height * drawRect.Height / _maxHeight;
+        var scrollY = (-_currentYOffset) * height / _maxHeight;
+
+        paint.Color = trackColor;
+        var trackRect = new SKRect(drawRect.Right - width + 2, ItemTemplate.GetHeaderHeight(), drawRect.Right - 2, ItemTemplate.GetHeaderHeight() + height);
+        canvas.DrawRoundRect(trackRect, cornerRadius, cornerRadius, paint);
+
+        paint.Color = thumbColor;
+        var rect = new SKRect(drawRect.Right - width + 2, ItemTemplate.GetHeaderHeight() + scrollY, drawRect.Right - 2, ItemTemplate.GetHeaderHeight() + scrollY + scrollHeight);
+        canvas.DrawRoundRect(rect,cornerRadius, cornerRadius, paint);
+       
     }
 
     private void GetVisibleItems(float currentYOffset, float canvasHeight)

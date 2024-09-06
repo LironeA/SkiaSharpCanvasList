@@ -1,5 +1,11 @@
-﻿using SkiaSharp;
+﻿
+using Microsoft.Maui.Graphics.Platform;
+using SkiaSharp;
+using SkiaSharp.Views.Maui;
+using SkiaSharp.Views.Maui.Controls;
 using System.Reflection;
+using CommunityToolkit.Mvvm.Input;
+using ServioPOSCustomComponents;
 
 namespace CanvasScrollTest.Components.ListComponent;
 
@@ -47,6 +53,11 @@ public class ItemTemplate
     public SKPaint BackgroundPaint { get; set; }
     private SKPaint _borderPaint { get; set; }
     private SKPaint _headerPaint { get; set; }
+    public PropertyInfo IsSelectedProperty { get; set; }
+    public IRelayCommand OnItemSelected { get; set; }
+
+    public Func<object?, SKColor?> GetBackGroundColor { get; set; }
+    private SKPaint _backgroundItemPaint;
 
     public ItemTemplate()
     {
@@ -55,6 +66,7 @@ public class ItemTemplate
         ShowHeaders = true;
         HeaderHeight = 50f;
         HeaderBackground = SKColors.LightGray;
+        _backgroundItemPaint = new SKPaint { Style = SKPaintStyle.Fill };
     }
 
     public float GetHeaderHeight()
@@ -68,8 +80,15 @@ public class ItemTemplate
 
     public void Draw(SKCanvas canvas, object item, SKRect bounds)
     {
-
-        //canvas.DrawRect(bounds, _backgroundPaint);
+        if (GetBackGroundColor is not null)
+        {
+            var color = GetBackGroundColor(item);
+            if (color is not null)
+            {
+                _backgroundItemPaint.Color = color.Value;
+                canvas.DrawRect(bounds, _backgroundItemPaint);
+            }
+        }
         canvas.DrawRect(bounds, _borderPaint);
 
         RowDefinitions.DrawRows(canvas, item, bounds);
@@ -84,6 +103,56 @@ public class ItemTemplate
             canvas.DrawRect(headerBounds, _headerPaint);
             RowDefinitions.Rows[0].ColumnDefinitions.DrawHeaders(canvas, headerBounds);
         }
+    }
+
+    public void ProccessItemClick(ListDrawable item, float x, float y)
+    {
+        Row clickedRow = null;
+        SKRect clikedRowBounds = new SKRect();
+        ColumnBase clickedColumn = null;
+        for (int i = 0; i < RowDefinitions.Rows.Count; i++)
+        {
+            var row = RowDefinitions.Rows[i];
+            clikedRowBounds = RowDefinitions.GetRowBounds(item.Item, i, item.Rect.Top, item.Rect.Width, item.Rect.Height);
+            if (clikedRowBounds.Contains(x, y))
+            {
+                clickedRow = row;
+                break;
+            }
+        }
+
+        if (clickedRow is null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < clickedRow.ColumnDefinitions.Columns.Count; i++)
+        {
+            var column = clickedRow.ColumnDefinitions.Columns[i];
+            var columnBounds = clickedRow.ColumnDefinitions.GetColumnBounds(i, clikedRowBounds.Top, clikedRowBounds.Height, clikedRowBounds.Width);
+            if (columnBounds.Contains(x, y))
+            {
+                clickedColumn = column;
+                break;
+            }
+        }
+
+        if (clickedColumn is null)
+        {
+            return;
+        }
+
+        var result = clickedColumn.ProccesClick(item);
+
+        if (!result && IsSelectedProperty is not null)
+        {
+            IsSelectedProperty.SetValue(item.Item, !(bool)IsSelectedProperty.GetValue(item.Item));
+            if (OnItemSelected is not null)
+            {
+                OnItemSelected.Execute(item.Item);
+            }
+        }
+
     }
 }
 
@@ -174,12 +243,15 @@ public class ColumnDefinitions
         return new SKRect(GetColumnStartX(column, width), y, GetColumnStartX(column + 1, width), y + height);
     }
 
-    public float GetColumnStartX(int column, float canvasWidth)
+    public float GetColumnStartX(int columnNumber, float canvasWidth)
     {
         float x = 0;
-        for (int i = 0; i < column; i++)
+        for (int i = 0; i < columnNumber; i++)
         {
-            x += Columns[i].GetWidth(canvasWidth);
+            var column = Columns[i];
+            float sumOfPixelColumns = Columns.Sum(c => c.UnitType == UnitType.Pixel ? c.Width : 0f);
+            float width = canvasWidth - sumOfPixelColumns;
+            x += column.GetWidth(width);
         }
         return x;
     }
@@ -199,10 +271,15 @@ public class ColumnDefinitions
         for (int i = 0; i < Columns.Count; i++)
         {
             var column = Columns[i];
-            var columnBounds = GetColumnBounds(i, bounds.Top, bounds.Height, bounds.Width);
-            column.DrawHeader(canvas, columnBounds);
+            if (column.NeedToDrawHeader)
+            {
+                var columnBounds = GetColumnBounds(i, bounds.Top, bounds.Height, bounds.Width);
+                column.DrawHeader(canvas, columnBounds);
+            }
         }
     }
+
+
 }
 
 
@@ -211,7 +288,9 @@ public abstract class ColumnBase
     public string Name { get; set; }
     public float Width { get; set; }
     public UnitType UnitType { get; set; }
+    public IRelayCommand ClickCommand { get; set; }
     public virtual void Draw(SKCanvas canvas, object item, SKRect bounds) { }
+    public bool NeedToDrawHeader { get; set; } = true;
     public virtual void DrawHeader(SKCanvas canvas, SKRect bounds) { }
 
     public float GetWidth(float canvasWidth)
@@ -222,6 +301,16 @@ public abstract class ColumnBase
             UnitType.Pixel => Width,
             _ => 0
         };
+    }
+
+    public virtual bool ProccesClick(ListDrawable item)
+    {
+        if (ClickCommand is not null)
+        {
+            ClickCommand.Execute(item.Item);
+            return true;
+        }
+        return false;
     }
 }
 
@@ -267,6 +356,83 @@ public class PropertyColumn : ColumnBase
     public override void DrawHeader(SKCanvas canvas, SKRect bounds)
     {
         canvas.DrawString(Name, bounds, Paint, 1, HorizontalAlignment, VerticalAlignment);
+    }
+}
+
+public class IconColumn : ColumnBase
+{
+    public SKBitmap _bitmap;
+
+    public override void Draw(SKCanvas canvas, object item, SKRect bounds)
+    {
+        if (_bitmap is not null)
+        {
+            canvas.DrawBitmap(_bitmap, bounds, BitmapStretch.Uniform);
+        }
+    }
+
+
+
+    public override void DrawHeader(SKCanvas canvas, SKRect bounds)
+    {
+        // Draw header for icon columnNumber
+    }
+}
+
+public class CheckBoxColumn : ColumnBase
+{
+    public PropertyInfo IsCheckedProperty { get; set; }
+    public float Size { get; set; }
+    public float CornerRadius { get; set; }
+    public IRelayCommand OnCheckedChanged { get; set; }
+
+    public SKPaint BorderPaint { get; set; }
+    public SKPaint FillPaint { get; set; }
+
+    public override void Draw(SKCanvas canvas, object item, SKRect bounds)
+    {
+        var checkedValue = (bool)IsCheckedProperty.GetValue(item);
+        SKRect rext = new SKRect(bounds.MidX - Size / 2, bounds.MidY - Size / 2, bounds.MidX + Size / 2, bounds.MidY + Size / 2);
+        SKRoundRect roundRect = new SKRoundRect(rext, CornerRadius, CornerRadius);
+        if (checkedValue)
+        {
+            FillPaint.IsAntialias = true;
+            canvas.DrawRoundRect(roundRect, FillPaint);
+        }
+        BorderPaint.IsAntialias = true;
+        canvas.DrawRoundRect(roundRect, BorderPaint);
+    }
+    public override void DrawHeader(SKCanvas canvas, SKRect bounds)
+    {
+        // Draw header for checkbox columnNumber
+    }
+
+    public override bool ProccesClick(ListDrawable item)
+    {
+        if (IsCheckedProperty is not null)
+        {
+            IsCheckedProperty.SetValue(item.Item, !(bool)IsCheckedProperty.GetValue(item.Item));
+            if (OnCheckedChanged is not null)
+            {
+                OnCheckedChanged.Execute(item.Item);
+            }
+            return true;
+        }
+        return false;
+    }
+}
+
+
+public class CustomColumn : ColumnBase
+{
+    public Action<SKCanvas, object, SKRect> DrawAction { get; set; }
+    public override void Draw(SKCanvas canvas, object item, SKRect bounds)
+    {
+        DrawAction.Invoke(canvas, item, bounds);
+    }
+    public override void DrawHeader(SKCanvas canvas, SKRect bounds)
+    {
+        // Draw header for custom columnNumber
     }
 }
 

@@ -32,7 +32,7 @@ namespace CanvasScrollTest
         [RelayCommand]
         public void AddItem()
         {
-            for (int i = 0; i < 1000; i++)
+            for (int i = 0; i < 20; i++)
             {
                 Items.Add(new TestModel() { Id = id, Name = "Item " + id, Comment = id % 3 == 0 ? "This is a long text that will be split into multiple lines based on the width and maximum line count." : "" });
                 id++;
@@ -48,6 +48,13 @@ namespace CanvasScrollTest
             }
         }
 
+        [RelayCommand]
+        private void ChangeName(object? obj)
+        {
+            var item = obj as TestModel;
+            item.Name = "Changed " + Random.Shared.Next();
+        }
+
     }
 
 
@@ -56,5 +63,7 @@ namespace CanvasScrollTest
         [ObservableProperty] public int _id;
         [ObservableProperty] public string _name;
         [ObservableProperty] public string _comment;
+        [ObservableProperty] public bool _isChecked;
+        [ObservableProperty] public bool _isSelected;
     }
 }

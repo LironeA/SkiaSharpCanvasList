@@ -3,7 +3,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              xmlns:canvasScrollTest="clr-namespace:CanvasScrollTest"
              xmlns:controls="clr-namespace:SkiaSharp.Views.Maui.Controls;assembly=SkiaSharp.Views.Maui.Controls"
-             xmlns:listComponent="clr-namespace:CanvasScrollTest.Components.ListComponent"
+             xmlns:listComponent1="clr-namespace:CanvasScrollTest.Components.ListComponent;assembly=ServioPOSCustomComponents"
              x:DataType="canvasScrollTest:MainPageVM"
              x:Class="CanvasScrollTest.MainPage">
     <Grid RowDefinitions="50, *"
@@ -29,7 +29,7 @@
                                Touch="CanvasView_Touch"
                                PaintSurface="hslCanvasView_PaintSurface" />-->
 
-        <listComponent:CustomList x:Name="lst"
+        <listComponent1:CustomList x:Name="lst"
                                      Grid.Row="1"
                                      Grid.ColumnSpan="2" />
     </Grid>
